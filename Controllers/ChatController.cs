@@ -7,6 +7,29 @@ using Messenger_server.Models;
 
 namespace Messenger_server.Controllers
 {
+
+    public record CreateChatRequest(string AccessCode, string Name, int UserId);
+    public record JoinChatRequest(string AccessCode, int UserId);
+
+    public class ChatRoomDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string AccessCode { get; set; } = string.Empty;
+        public int UnreadCount { get; set; }
+    }
+
+    public class MessageDto
+    {
+        public int Id { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public string? ImageUrl { get; set; }
+        public DateTime SentAt { get; set; }
+        public string SenderName { get; set; } = string.Empty;
+        public string? SenderAvatar { get; set; }
+        public int SenderId { get; set; }
+    }
+
     [ApiController]
     [Route("api/[controller]")]
     public class ChatController : ControllerBase
@@ -21,12 +44,17 @@ namespace Messenger_server.Controllers
         [HttpPost("create")]
         public async Task<IActionResult> CreateChat([FromBody] CreateChatRequest request)
         {
-            if (await _context.ChatRooms.AnyAsync(c => c.AccessCode == request.AccessCode))
+            var code = request.AccessCode?.Trim();
+
+            if (string.IsNullOrEmpty(code) || code.Length != 10)
+                return BadRequest("Access code must be exactly 10 characters");
+
+            if (await _context.ChatRooms.AnyAsync(c => c.AccessCode == code))
                 return BadRequest("Access code already exists");
 
             var chat = new ChatRoom
             {
-                AccessCode = request.AccessCode,
+                AccessCode = code, 
                 Name = request.Name,
                 CreatedById = request.UserId
             };
@@ -42,7 +70,13 @@ namespace Messenger_server.Controllers
             });
 
             await _context.SaveChangesAsync();
-            return Ok(chat);
+
+            return Ok(new ChatRoomDto
+            {
+                Id = chat.Id,
+                Name = chat.Name,
+                AccessCode = chat.AccessCode
+            });
         }
 
         [HttpPost("join")]
@@ -107,6 +141,4 @@ namespace Messenger_server.Controllers
         }
     }
 
-    public record CreateChatRequest(string AccessCode, string Name, int UserId);
-    public record JoinChatRequest(string AccessCode, int UserId);
 }

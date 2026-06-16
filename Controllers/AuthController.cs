@@ -63,7 +63,7 @@ namespace MoonMessenger.Controllers
                 if (user == null)
                     return Unauthorized("Invalid credentials");
 
-                // Сравниваем хеши
+            
                 var hash = HashPassword(request.Password);
                 if (user.PasswordHash != hash)
                     return Unauthorized("Invalid credentials");
