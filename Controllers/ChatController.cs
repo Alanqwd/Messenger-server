@@ -2,14 +2,12 @@
 using Messenger_server.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Messenger_server.Data;
-using Messenger_server.Models;
 
 namespace Messenger_server.Controllers
 {
-
-    public record CreateChatRequest(string AccessCode, string Name, int UserId);
+    public record CreateChatRequest(string AccessCode, string Name, int UserId, string? AvatarUrl, string? Description);
     public record JoinChatRequest(string AccessCode, int UserId);
+    public record LeaveChatRequest(int ChatId, int UserId);
 
     public class ChatRoomDto
     {
@@ -17,6 +15,8 @@ namespace Messenger_server.Controllers
         public string Name { get; set; } = string.Empty;
         public string AccessCode { get; set; } = string.Empty;
         public int UnreadCount { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? Description { get; set; } 
     }
 
     public class MessageDto
@@ -28,6 +28,14 @@ namespace Messenger_server.Controllers
         public string SenderName { get; set; } = string.Empty;
         public string? SenderAvatar { get; set; }
         public int SenderId { get; set; }
+    }
+
+    public class ChatMemberDto
+    {
+        public int UserId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string? AvatarUrl { get; set; }
+        public bool IsOnline { get; set; }
     }
 
     [ApiController]
@@ -54,9 +62,11 @@ namespace Messenger_server.Controllers
 
             var chat = new ChatRoom
             {
-                AccessCode = code, 
+                AccessCode = code,
                 Name = request.Name,
-                CreatedById = request.UserId
+                CreatedById = request.UserId,
+                AvatarUrl = request.AvatarUrl, 
+                Description = request.Description 
             };
 
             _context.ChatRooms.Add(chat);
@@ -75,7 +85,9 @@ namespace Messenger_server.Controllers
             {
                 Id = chat.Id,
                 Name = chat.Name,
-                AccessCode = chat.AccessCode
+                AccessCode = chat.AccessCode,
+                AvatarUrl = chat.AvatarUrl,
+                Description = chat.Description
             });
         }
 
@@ -99,7 +111,48 @@ namespace Messenger_server.Controllers
                 await _context.SaveChangesAsync();
             }
 
-            return Ok(chat);
+            return Ok(new ChatRoomDto
+            {
+                Id = chat.Id,
+                Name = chat.Name,
+                AccessCode = chat.AccessCode,
+                UnreadCount = 0,
+                AvatarUrl = chat.AvatarUrl,
+                Description = chat.Description
+            });
+        }
+
+        [HttpPost("leave")]
+        public async Task<IActionResult> LeaveChat([FromBody] LeaveChatRequest request)
+        {
+            var userChat = await _context.UserChatRooms
+                .FirstOrDefaultAsync(uc => uc.UserId == request.UserId && uc.ChatRoomId == request.ChatId);
+
+            if (userChat == null)
+                return NotFound("User is not in this chat");
+
+            _context.UserChatRooms.Remove(userChat);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Successfully left the chat" });
+        }
+
+
+        [HttpGet("members/{chatId}")]
+        public async Task<IActionResult> GetChatMembers(int chatId)
+        {
+            var members = await _context.UserChatRooms
+                .Where(uc => uc.ChatRoomId == chatId)
+                .Select(uc => new ChatMemberDto
+                {
+                    UserId = uc.UserId,
+                    Username = uc.User.Username,
+                    AvatarUrl = uc.User.AvatarUrl,
+                    IsOnline = false 
+                })
+                .ToListAsync();
+
+            return Ok(members);
         }
 
         [HttpGet("my-chats/{userId}")]
@@ -112,7 +165,9 @@ namespace Messenger_server.Controllers
                     uc.ChatRoom.Id,
                     uc.ChatRoom.Name,
                     uc.ChatRoom.AccessCode,
-                    uc.UnreadCount
+                    uc.UnreadCount,
+                    uc.ChatRoom.AvatarUrl,
+                    uc.ChatRoom.Description 
                 })
                 .ToListAsync();
 
@@ -140,5 +195,4 @@ namespace Messenger_server.Controllers
             return Ok(messages);
         }
     }
-
 }

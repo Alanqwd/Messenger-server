@@ -46,7 +46,7 @@ namespace MoonMessenger.Controllers
             }
             catch (Exception ex)
             {
-                // Это запишет ошибку в консоль Visual Studio, чтобы вы видели причину
+            
                 Console.WriteLine($"Registration Error: {ex.Message}");
                 Console.WriteLine($"Inner Exception: {ex.InnerException?.Message}");
                 return StatusCode(500, "Internal server error during registration");
