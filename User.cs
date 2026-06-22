@@ -19,5 +19,7 @@ namespace Messenger_server.Models
 
         [MaxLength(500)]
         public string? Bio { get; set; }
+
+        public string? SessionToken { get; set; }
     }
 }

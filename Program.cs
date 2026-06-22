@@ -1,11 +1,11 @@
-using Messenger_server.Data;
+﻿using Messenger_server.Data;
 using Messenger_server.Hubs;
+using Messenger_server.Filters;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
-
 
 builder.Services.AddSignalR(options =>
 {
@@ -18,16 +18,20 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// ✅ Настройка CORS - разрешаем localhost:5173 (исправил порт с 5174 на 5173)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins("http://localhost:5174", "http://localhost:3000")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
 });
+
+// ✅ Регистрируем фильтр сессии как Scoped (для использования через атрибут в контроллерах)
+builder.Services.AddScoped<SessionAuthFilter>();
 
 var app = builder.Build();
 
@@ -37,10 +41,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseStaticFiles();
 
-app.UseStaticFiles(); 
-
+// ✅ ВАЖНО: CORS должен быть ПЕРЕД авторизацией и контроллерами
 app.UseCors("AllowAll");
+
 app.UseAuthorization();
 
 app.MapControllers();

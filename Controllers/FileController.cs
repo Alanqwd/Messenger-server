@@ -1,11 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Messenger_server.Filters;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
 
 namespace Messenger_server.Controllers
 {
         [ApiController]
         [Route("api/[controller]")]
-        public class FileController : ControllerBase
+        [ServiceFilter(typeof(SessionAuthFilter))]
+    public class FileController : ControllerBase
         {
             private readonly IWebHostEnvironment _environment;
 

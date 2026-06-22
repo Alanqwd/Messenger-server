@@ -36,19 +36,18 @@ namespace MoonMessenger.Controllers
                     Username = request.Username,
                     PasswordHash = HashPassword(request.Password),
                     Bio = request.Bio,
-                    AvatarUrl = request.AvatarUrl
+                    AvatarUrl = request.AvatarUrl,
+                    SessionToken = Guid.NewGuid().ToString()
                 };
 
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
-                return Ok(new { UserId = user.Id, Username = user.Username });
+                return Ok(new { UserId = user.Id, Username = user.Username, SessionToken = user.SessionToken });
             }
             catch (Exception ex)
             {
-            
                 Console.WriteLine($"Registration Error: {ex.Message}");
-                Console.WriteLine($"Inner Exception: {ex.InnerException?.Message}");
                 return StatusCode(500, "Internal server error during registration");
             }
         }
@@ -63,12 +62,24 @@ namespace MoonMessenger.Controllers
                 if (user == null)
                     return Unauthorized("Invalid credentials");
 
-            
                 var hash = HashPassword(request.Password);
                 if (user.PasswordHash != hash)
                     return Unauthorized("Invalid credentials");
 
-                return Ok(new { UserId = user.Id, Username = user.Username, AvatarUrl = user.AvatarUrl, Bio = user.Bio });
+           
+                var newToken = Guid.NewGuid().ToString();
+                user.SessionToken = newToken;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    UserId = user.Id,
+                    Username = user.Username,
+                    AvatarUrl = user.AvatarUrl,
+                    Bio = user.Bio,
+                    SessionToken = newToken 
+                });
             }
             catch (Exception ex)
             {
@@ -77,32 +88,10 @@ namespace MoonMessenger.Controllers
             }
         }
 
-        [HttpPut("profile")]
-        public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
+        protected bool IsSessionValid(int userId, string token)
         {
-            try
-            {
-                var user = await _context.Users.FindAsync(request.UserId);
-                if (user == null) return NotFound();
-
-                if (request.Username != user.Username)
-                {
-                    if (await _context.Users.AnyAsync(u => u.Username == request.Username))
-                        return BadRequest("Username already taken");
-                    user.Username = request.Username;
-                }
-
-                user.Bio = request.Bio;
-                user.AvatarUrl = request.AvatarUrl;
-
-                await _context.SaveChangesAsync();
-                return Ok(user);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Profile Update Error: {ex.Message}");
-                return StatusCode(500, "Internal server error during profile update");
-            }
+            var user = _context.Users.Find(userId);
+            return user != null && user.SessionToken == token;
         }
 
         private string HashPassword(string password)
@@ -116,5 +105,4 @@ namespace MoonMessenger.Controllers
 
     public record RegisterRequest(string Username, string Password, string? AvatarUrl, string? Bio);
     public record LoginRequest(string Username, string Password);
-    public record UpdateProfileRequest(int UserId, string Username, string? AvatarUrl, string? Bio);
 }

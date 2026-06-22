@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36811.4 d17.14
+VisualStudioVersion = 17.14.36811.4
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Messenger-server", "Messenger-server.csproj", "{475884EA-6A5B-491A-BE52-75A9CE4B0BB1}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Messenger-server", "Messenger-server.csproj", "{475884EA-6A5B-491A-BE52-75A9CE4B0BB1}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Models", "Models", "{36D591C7-65C7-A0D1-1CBC-10CDE441BDC8}"
 	ProjectSection(SolutionItems) = preProject
@@ -16,6 +16,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Data", "Data", "{A6055B0D-6ED0-417E-AACC-A793EA9C0F2A}"
 	ProjectSection(SolutionItems) = preProject
 		AppDbContext.cs = AppDbContext.cs
+		SessionAuthFilter.cs = SessionAuthFilter.cs
+		UserChatRoomConfiguration.cs = UserChatRoomConfiguration.cs
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Hubs", "Hubs", "{2270E2DE-084D-4593-8CF7-88F296FC89FE}"

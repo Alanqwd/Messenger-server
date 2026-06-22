@@ -1,5 +1,8 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace Messenger_server.Models
 {
+    [Table("UserChatRooms")]
     public class UserChatRoom
     {
         public int UserId { get; set; }
