@@ -10,14 +10,14 @@ namespace Messenger_server.Filters
     {
         public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            // ✅ Пропускаем OPTIONS запросы (preflight CORS)
+
             if (context.HttpContext.Request.Method == "OPTIONS")
             {
                 await next();
                 return;
             }
 
-            // Пропускаем авторизацию для логина и регистрации
+            
             var controller = context.RouteData.Values["controller"]?.ToString();
             var action = context.RouteData.Values["action"]?.ToString();
 
@@ -27,27 +27,39 @@ namespace Messenger_server.Filters
                 return;
             }
 
-            // Получаем токен из заголовка
-            var token = context.HttpContext.Request.Headers["Authorization"]
-                .FirstOrDefault()?.Split(" ").Last();
+        
+            var authHeader = context.HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+            var sessionHeader = context.HttpContext.Request.Headers["X-Session-Token"].FirstOrDefault();
+
+            string? token = null;
+
+            if (!string.IsNullOrEmpty(authHeader))
+            {
+                token = authHeader.StartsWith("Bearer ") ? authHeader.Substring(7) : authHeader;
+            }
+
+            if (string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(sessionHeader))
+            {
+                token = sessionHeader;
+            }
 
             if (string.IsNullOrEmpty(token))
             {
-                context.Result = new UnauthorizedObjectResult("No session token");
+                context.Result = new UnauthorizedObjectResult(new { message = "No session token provided" });
                 return;
             }
 
-            // Получаем DbContext
             var dbContext = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
 
-            // Проверяем, есть ли пользователь с таким токеном
-            var userExists = await dbContext.Users.AnyAsync(u => u.SessionToken == token);
+            var user = await dbContext.Users.FirstOrDefaultAsync(u => u.SessionToken == token);
 
-            if (!userExists)
+            if (user == null)
             {
-                context.Result = new UnauthorizedObjectResult("Session expired or logged in elsewhere");
+                context.Result = new UnauthorizedObjectResult(new { message = "Invalid or expired session. Please log in again." });
                 return;
             }
+
+            context.HttpContext.Items["UserId"] = user.Id;
 
             await next();
         }

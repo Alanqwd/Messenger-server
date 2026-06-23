@@ -23,13 +23,21 @@ namespace MoonMessenger.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
+            Console.WriteLine($"[Register] Получен запрос: Username={request.Username}, Password length={request.Password?.Length}");
+
             try
             {
                 if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+                {
+                    Console.WriteLine("[Register] Ошибка: Пустые поля");
                     return BadRequest("Username and Password are required");
+                }
 
                 if (await _context.Users.AnyAsync(u => u.Username == request.Username))
+                {
+                    Console.WriteLine($"[Register] Ошибка: Username '{request.Username}' уже существует");
                     return BadRequest("Username already exists");
+                }
 
                 var user = new User
                 {
@@ -43,12 +51,17 @@ namespace MoonMessenger.Controllers
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync();
 
+                Messenger_server.Hubs.ChatHub._onlineUsers.TryRemove(user.Id, out _);
+
+                Console.WriteLine($"[Register] Успешно создан пользователь {user.Username} с ID {user.Id}");
+
                 return Ok(new { UserId = user.Id, Username = user.Username, SessionToken = user.SessionToken });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Registration Error: {ex.Message}");
-                return StatusCode(500, "Internal server error during registration");
+                Console.WriteLine($"[Register] КРИТИЧЕСКАЯ ОШИБКА: {ex.Message}");
+                Console.WriteLine($"[Register] StackTrace: {ex.StackTrace}");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
 
@@ -66,7 +79,11 @@ namespace MoonMessenger.Controllers
                 if (user.PasswordHash != hash)
                     return Unauthorized("Invalid credentials");
 
-           
+                if (Messenger_server.Hubs.ChatHub._onlineUsers.ContainsKey(user.Id))
+                {
+                    return BadRequest("Этот аккаунт уже используется другим пользователем");
+                }
+
                 var newToken = Guid.NewGuid().ToString();
                 user.SessionToken = newToken;
 
@@ -78,7 +95,7 @@ namespace MoonMessenger.Controllers
                     Username = user.Username,
                     AvatarUrl = user.AvatarUrl,
                     Bio = user.Bio,
-                    SessionToken = newToken 
+                    SessionToken = newToken
                 });
             }
             catch (Exception ex)
