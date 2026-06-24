@@ -101,8 +101,35 @@ namespace Messenger_server.Hubs
                 Console.WriteLine($"ERROR in JoinChat: {ex.Message}");
             }
         }
+        public async Task SendSticker(int chatRoomId, int userId, string stickerUrl)
+        {
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return;
 
-    
+            var message = new Message
+            {
+                ChatRoomId = chatRoomId,
+                SenderId = userId,
+                StickerUrl = stickerUrl, 
+                SentAt = DateTime.UtcNow
+            };
+
+            _context.Messages.Add(message);
+            await _context.SaveChangesAsync();
+
+            var groupName = $"Chat_{chatRoomId}";
+            await Clients.Group(groupName).SendAsync("ReceiveSticker", new
+            {
+                message.Id,
+                message.ChatRoomId,
+                SenderId = userId,
+                SenderName = user.Username,
+                SenderAvatar = user.AvatarUrl,
+                message.StickerUrl,
+                message.SentAt
+            });
+        }
+
         public async Task LeaveChatFromHub(int chatRoomId, int userId)
         {
             try
@@ -129,58 +156,36 @@ namespace Messenger_server.Hubs
             }
         }
 
-        public async Task SendMessage(int chatRoomId, int senderId, string content, string? imageUrl)
+        public async Task SendMessage(int chatRoomId, int userId, string content, string? imageUrl)
         {
-            try
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return;
+
+            var message = new Message
             {
-           
-                var message = new Message
-                {
-                    ChatRoomId = chatRoomId,
-                    SenderId = senderId,
-                    Content = content,
-                    ImageUrl = imageUrl,
-                    SentAt = DateTime.UtcNow
-                };
+                ChatRoomId = chatRoomId,
+                SenderId = userId,
+                Content = content,
+                ImageUrl = imageUrl,   // ✅ Сохраняем URL стикера
+                SentAt = DateTime.UtcNow
+            };
 
-                _context.Messages.Add(message);
-                await _context.SaveChangesAsync();
+            _context.Messages.Add(message);
+            await _context.SaveChangesAsync();
 
-                var participants = await _context.UserChatRooms
-                    .Where(uc => uc.ChatRoomId == chatRoomId && uc.UserId != senderId)
-                    .ToListAsync();
-
-                foreach (var participant in participants)
-                {
-                    participant.UnreadCount++;
-                }
-                await _context.SaveChangesAsync();
-
-        
-                var sender = await _context.Users.FindAsync(senderId);
-
-  
-                await Clients.Group($"chat_{chatRoomId}").SendAsync("ReceiveMessage", new
-                {
-                    message.Id,
-                    message.Content,
-                    message.ImageUrl,
-                    message.SentAt,
-                    SenderName = sender?.Username ?? "Unknown",
-                    SenderAvatar = sender?.AvatarUrl,
-                    SenderId = senderId,
-                    ChatRoomId = chatRoomId
-                });
-
-     
-                await Clients.OthersInGroup($"chat_{chatRoomId}").SendAsync("UpdateUnreadBadge", chatRoomId);
-            }
-            catch (Exception ex)
+            var groupName = $"Chat_{chatRoomId}";
+            await Clients.Group(groupName).SendAsync("ReceiveMessage", new
             {
-                Console.WriteLine($"ERROR in SendMessage: {ex.Message}");
-            }
+                message.Id,
+                message.ChatRoomId,
+                SenderId = userId,
+                SenderName = user.Username,
+                SenderAvatar = user.AvatarUrl,
+                message.Content,
+                message.ImageUrl,      
+                message.SentAt
+            });
         }
-
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
   
