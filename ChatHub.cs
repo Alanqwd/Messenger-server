@@ -9,80 +9,107 @@ namespace Messenger_server.Hubs
     public class ChatHub : Hub
     {
         private readonly AppDbContext _context;
-
         public static readonly ConcurrentDictionary<int, string> _onlineUsers = new();
+        private static readonly ConcurrentDictionary<string, int> _connectionToUser = new();
 
         public ChatHub(AppDbContext context)
         {
             _context = context;
         }
 
-        public async Task UserConnected(int userId, string token)
+        public override async Task OnConnectedAsync()
+        {
+            Console.WriteLine($"Новое подключение: {Context.ConnectionId}");
+            await base.OnConnectedAsync();
+        }
+
+        public async Task<UserStatusResponse> UserConnected(int userId, string token)
         {
             try
             {
-                Console.WriteLine($"Attempting connection for User {userId}");
-
+                Console.WriteLine($"[UserConnected] Попытка подключения пользователя {userId}");
 
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
-
                 if (user == null)
                 {
-                    Console.WriteLine($"User {userId} not found in DB.");
+                    Console.WriteLine($"[UserConnected] Пользователь {userId} не найден");
                     Context.Abort();
-                    return;
+                    return new UserStatusResponse { Success = false, Message = "User not found" };
                 }
 
                 if (user.SessionToken != token)
                 {
-                    Console.WriteLine($"Invalid session token for User {userId}. Expected: {user.SessionToken}, Got: {token}");
-    
+                    Console.WriteLine($"[UserConnected] Неверный токен для пользователя {userId}");
                     Context.Abort();
-                    return;
+                    return new UserStatusResponse { Success = false, Message = "Invalid token" };
                 }
 
-             
-                if (_onlineUsers.ContainsKey(userId))
+            
+                if (_onlineUsers.TryGetValue(userId, out var oldConnectionId))
                 {
                     _onlineUsers.TryRemove(userId, out _);
+                    _connectionToUser.TryRemove(oldConnectionId, out _);
+                    Console.WriteLine($"[UserConnected] Удалено старое подключение для пользователя {userId}");
                 }
 
+          
                 _onlineUsers[userId] = Context.ConnectionId;
-                Console.WriteLine($"User {userId} successfully connected.");
+                _connectionToUser[Context.ConnectionId] = userId;
 
+                Console.WriteLine($"[UserConnected] Пользователь {userId} успешно подключен");
 
+            
+                var userChats = await _context.UserChatRooms
+                    .Where(uc => uc.UserId == userId)
+                    .Select(uc => uc.ChatRoomId)
+                    .ToListAsync();
+
+                foreach (var chatId in userChats)
+                {
+                    await Groups.AddToGroupAsync(Context.ConnectionId, $"chat_{chatId}");
+                    Console.WriteLine($"[UserConnected] Автоподписка на чат {chatId}");
+                }
+
+ 
                 await NotifyUserStatusChange(userId, true);
+
+                return new UserStatusResponse
+                {
+                    Success = true,
+                    Message = "Connected",
+                    ChatIds = userChats
+                };
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"CRITICAL ERROR in UserConnected: {ex.Message}");
+                Console.WriteLine($"[UserConnected] КРИТИЧЕСКАЯ ОШИБКА: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
                 Context.Abort();
+                return new UserStatusResponse { Success = false, Message = ex.Message };
             }
         }
 
-        public async Task JoinChat(int chatRoomId, int userId)
+        public async Task<JoinChatResponse> JoinChat(int chatRoomId, int userId)
         {
             try
             {
+                Console.WriteLine($"[JoinChat] Пользователь {userId} пытается войти в чат {chatRoomId}");
+
                 var userChat = await _context.UserChatRooms
                     .FirstOrDefaultAsync(uc => uc.UserId == userId && uc.ChatRoomId == chatRoomId);
 
                 if (userChat == null)
                 {
-                    Console.WriteLine($"User {userId} tried to join chat {chatRoomId} but is not a member.");
-                    return;
+                    Console.WriteLine($"[JoinChat] Пользователь {userId} не является участником чата {chatRoomId}");
+                    return new JoinChatResponse { Success = false, Message = "Not a member" };
                 }
 
+         
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"chat_{chatRoomId}");
+                Console.WriteLine($"[JoinChat] Пользователь {userId} добавлен в группу chat_{chatRoomId}");
 
-                if (userChat.UnreadCount > 0)
-                {
-                    userChat.UnreadCount = 0;
-                    await _context.SaveChangesAsync();
-                    await Clients.Caller.SendAsync("UnreadCountsUpdated");
-                }
-
+            
+          
                 var user = await _context.Users.FindAsync(userId);
                 if (user != null)
                 {
@@ -94,40 +121,100 @@ namespace Messenger_server.Hubs
                     );
                 }
 
-                Console.WriteLine($"User {userId} joined group chat_{chatRoomId}");
+
+                var recentMessages = await _context.Messages
+                    .Where(m => m.ChatRoomId == chatRoomId)
+                    .OrderByDescending(m => m.SentAt)
+                    .Take(50)
+                    .OrderBy(m => m.SentAt)
+                    .Select(m => new MessageDto
+                    {
+                        Id = m.Id,
+                        ChatRoomId = m.ChatRoomId,
+                        SenderId = m.SenderId,
+                        SenderName = m.Sender.Username,
+                        SenderAvatar = m.Sender.AvatarUrl,
+                        Content = m.Content,
+                        ImageUrl = m.ImageUrl,
+                        StickerUrl = m.StickerUrl,
+                        SentAt = m.SentAt
+                    })
+                    .ToListAsync();
+
+                Console.WriteLine($"[JoinChat] Отправлено {recentMessages.Count} сообщений пользователю {userId}");
+
+                return new JoinChatResponse
+                {
+                    Success = true,
+                    Message = "Joined",
+                    Messages = recentMessages
+                };
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"ERROR in JoinChat: {ex.Message}");
+                Console.WriteLine($"[JoinChat] ОШИБКА: {ex.Message}");
+                return new JoinChatResponse { Success = false, Message = ex.Message };
             }
         }
-        public async Task SendSticker(int chatRoomId, int userId, string stickerUrl)
+
+        public async Task<SendMessageResponse> SendMessage(int chatRoomId, int userId, string content, string? imageUrl, string? stickerUrl)
         {
-            var user = await _context.Users.FindAsync(userId);
-            if (user == null) return;
-
-            var message = new Message
+            try
             {
-                ChatRoomId = chatRoomId,
-                SenderId = userId,
-                StickerUrl = stickerUrl, 
-                SentAt = DateTime.UtcNow
-            };
+                Console.WriteLine($"[SendMessage] Пользователь {userId} отправляет сообщение в чат {chatRoomId}");
 
-            _context.Messages.Add(message);
-            await _context.SaveChangesAsync();
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return new SendMessageResponse { Success = false, Message = "User not found" };
+                }
 
-            var groupName = $"Chat_{chatRoomId}";
-            await Clients.Group(groupName).SendAsync("ReceiveSticker", new
+                var message = new Message
+                {
+                    ChatRoomId = chatRoomId,
+                    SenderId = userId,
+                    Content = content ?? string.Empty,
+                    ImageUrl = imageUrl,
+                    StickerUrl = stickerUrl,
+                    SentAt = DateTime.UtcNow
+                };
+
+                _context.Messages.Add(message);
+                await _context.SaveChangesAsync();
+
+                Console.WriteLine($"[SendMessage] Сообщение сохранено с ID {message.Id}");
+
+  
+                var messageDto = new MessageDto
+                {
+                    Id = message.Id,
+                    ChatRoomId = message.ChatRoomId,
+                    SenderId = userId,
+                    SenderName = user.Username,
+                    SenderAvatar = user.AvatarUrl,
+                    Content = message.Content,
+                    ImageUrl = message.ImageUrl,
+                    StickerUrl = message.StickerUrl,
+                    SentAt = message.SentAt
+                };
+
+       
+                var groupName = $"chat_{chatRoomId}";
+                await Clients.Group(groupName).SendAsync("ReceiveMessage", messageDto);
+
+                Console.WriteLine($"[SendMessage] Сообщение отправлено в группу {groupName}");
+                return new SendMessageResponse
+                {
+                    Success = true,
+                    Message = "Sent",
+                    MessageId = message.Id
+                };
+            }
+            catch (Exception ex)
             {
-                message.Id,
-                message.ChatRoomId,
-                SenderId = userId,
-                SenderName = user.Username,
-                SenderAvatar = user.AvatarUrl,
-                message.StickerUrl,
-                message.SentAt
-            });
+                Console.WriteLine($"[SendMessage] ОШИБКА: {ex.Message}");
+                return new SendMessageResponse { Success = false, Message = ex.Message };
+            }
         }
 
         public async Task LeaveChatFromHub(int chatRoomId, int userId)
@@ -136,7 +223,6 @@ namespace Messenger_server.Hubs
             {
                 await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"chat_{chatRoomId}");
 
-       
                 var user = await _context.Users.FindAsync(userId);
                 if (user != null)
                 {
@@ -148,53 +234,21 @@ namespace Messenger_server.Hubs
                     );
                 }
 
-                Console.WriteLine($"User {userId} left group chat_{chatRoomId}");
+                Console.WriteLine($"[LeaveChat] Пользователь {userId} покинул чат {chatRoomId}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"ERROR in LeaveChatFromHub: {ex.Message}");
+                Console.WriteLine($"[LeaveChat] ОШИБКА: {ex.Message}");
             }
         }
 
-        public async Task SendMessage(int chatRoomId, int userId, string content, string? imageUrl)
-        {
-            var user = await _context.Users.FindAsync(userId);
-            if (user == null) return;
-
-            var message = new Message
-            {
-                ChatRoomId = chatRoomId,
-                SenderId = userId,
-                Content = content,
-                ImageUrl = imageUrl,   // ✅ Сохраняем URL стикера
-                SentAt = DateTime.UtcNow
-            };
-
-            _context.Messages.Add(message);
-            await _context.SaveChangesAsync();
-
-            var groupName = $"Chat_{chatRoomId}";
-            await Clients.Group(groupName).SendAsync("ReceiveMessage", new
-            {
-                message.Id,
-                message.ChatRoomId,
-                SenderId = userId,
-                SenderName = user.Username,
-                SenderAvatar = user.AvatarUrl,
-                message.Content,
-                message.ImageUrl,      
-                message.SentAt
-            });
-        }
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-  
-            var userId = _onlineUsers.FirstOrDefault(x => x.Value == Context.ConnectionId).Key;
-
-            if (userId != 0)
+            if (_connectionToUser.TryRemove(Context.ConnectionId, out var userId))
             {
                 _onlineUsers.TryRemove(userId, out _);
-                Console.WriteLine($"User {userId} disconnected.");
+                Console.WriteLine($"[OnDisconnected] Пользователь {userId} отключился");
+
                 await NotifyUserStatusChange(userId, false);
             }
 
@@ -205,7 +259,6 @@ namespace Messenger_server.Hubs
         {
             try
             {
-               
                 var userChats = await _context.UserChatRooms
                     .Where(uc => uc.UserId == userId)
                     .Select(uc => uc.ChatRoomId)
@@ -213,13 +266,12 @@ namespace Messenger_server.Hubs
 
                 foreach (var chatId in userChats)
                 {
-           
                     await Clients.Group($"chat_{chatId}").SendAsync("UserStatusChanged", userId, isOnline);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error notifying status change: {ex.Message}");
+                Console.WriteLine($"[NotifyUserStatusChange] Ошибка: {ex.Message}");
             }
         }
 
@@ -230,8 +282,42 @@ namespace Messenger_server.Hubs
                 .Select(uc => uc.UserId)
                 .ToListAsync();
 
-
             return members.Where(id => _onlineUsers.ContainsKey(id)).ToList();
         }
+    }
+
+
+    public class UserStatusResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public List<int> ChatIds { get; set; } = new();
+    }
+
+    public class JoinChatResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public List<MessageDto> Messages { get; set; } = new();
+    }
+
+    public class SendMessageResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public int? MessageId { get; set; }
+    }
+
+    public class MessageDto
+    {
+        public int Id { get; set; }
+        public int ChatRoomId { get; set; }
+        public int SenderId { get; set; }
+        public string SenderName { get; set; } = string.Empty;
+        public string? SenderAvatar { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public string? ImageUrl { get; set; }
+        public string? StickerUrl { get; set; }
+        public DateTime SentAt { get; set; }
     }
 }
