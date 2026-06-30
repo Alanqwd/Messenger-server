@@ -55,7 +55,14 @@ namespace MoonMessenger.Controllers
 
                 Console.WriteLine($"[Register] Успешно создан пользователь {user.Username} с ID {user.Id}");
 
-                return Ok(new { UserId = user.Id, Username = user.Username, SessionToken = user.SessionToken });
+                return Ok(new
+                {
+                    UserId = user.Id,
+                    Username = user.Username,
+                    AvatarUrl = user.AvatarUrl,  
+                    Bio = user.Bio,              
+                    SessionToken = user.SessionToken
+                });
             }
             catch (Exception ex)
             {
