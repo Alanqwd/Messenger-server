@@ -11,6 +11,7 @@ namespace Messenger_server.Hubs
         private readonly AppDbContext _context;
         public static readonly ConcurrentDictionary<int, string> _onlineUsers = new();
         private static readonly ConcurrentDictionary<string, int> _connectionToUser = new();
+
         public class UserStatusResponse
         {
             public bool Success { get; set; }
@@ -44,6 +45,7 @@ namespace Messenger_server.Hubs
             public string? StickerUrl { get; set; }
             public DateTime SentAt { get; set; }
         }
+
         public ChatHub(AppDbContext context)
         {
             _context = context;
@@ -76,6 +78,7 @@ namespace Messenger_server.Hubs
                     return new UserStatusResponse { Success = false, Message = "Invalid token" };
                 }
 
+               
                 if (_onlineUsers.TryGetValue(userId, out var oldConnectionId))
                 {
                     _onlineUsers.TryRemove(userId, out _);
@@ -83,6 +86,7 @@ namespace Messenger_server.Hubs
                     Console.WriteLine($"[UserConnected] Удалено старое подключение для пользователя {userId}");
                 }
 
+                
                 _onlineUsers[userId] = Context.ConnectionId;
                 _connectionToUser[Context.ConnectionId] = userId;
 
@@ -181,8 +185,7 @@ namespace Messenger_server.Hubs
             }
         }
 
-     
-        public async Task<SendMessageResponse> SendMessage(int chatRoomId, int userId, string content, string imageUrl, string stickerUrl)
+        public async Task<SendMessageResponse> SendMessage(int chatRoomId, int userId, string content, string? imageUrl, string? stickerUrl)
         {
             try
             {
@@ -195,11 +198,12 @@ namespace Messenger_server.Hubs
                     return new SendMessageResponse { Success = false, Message = "User not found" };
                 }
 
-                
+                // Преобразуем пустые строки в null для БД
                 var finalImageUrl = string.IsNullOrWhiteSpace(imageUrl) ? null : imageUrl;
                 var finalStickerUrl = string.IsNullOrWhiteSpace(stickerUrl) ? null : stickerUrl;
                 var finalContent = string.IsNullOrWhiteSpace(content) ? string.Empty : content;
 
+         
                 var message = new Message
                 {
                     ChatRoomId = chatRoomId,
@@ -215,6 +219,7 @@ namespace Messenger_server.Hubs
 
                 Console.WriteLine($"[SendMessage] Сообщение сохранено с ID {message.Id}");
 
+        
                 var messageDto = new MessageDto
                 {
                     Id = message.Id,
@@ -228,6 +233,7 @@ namespace Messenger_server.Hubs
                     SentAt = message.SentAt
                 };
 
+             
                 var groupName = $"chat_{chatRoomId}";
                 Console.WriteLine($"[SendMessage] Отправка в группу {groupName}");
                 await Clients.Group(groupName).SendAsync("ReceiveMessage", messageDto);
@@ -241,12 +247,14 @@ namespace Messenger_server.Hubs
             }
             catch (Exception ex)
             {
+           
                 Console.WriteLine($"[SendMessage] 🔥 ОШИБКА: {ex.Message}");
                 Console.WriteLine($"[SendMessage] StackTrace: {ex.StackTrace}");
                 if (ex.InnerException != null)
                 {
                     Console.WriteLine($"[SendMessage] Inner: {ex.InnerException.Message}");
                 }
+
                 return new SendMessageResponse { Success = false, Message = ex.Message };
             }
         }
@@ -319,5 +327,4 @@ namespace Messenger_server.Hubs
             return members.Where(id => _onlineUsers.ContainsKey(id)).ToList();
         }
     }
-
 }
